@@ -1,0 +1,133 @@
+name: Branch Verification
+
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  verify-requirements:
+    runs-on: ubuntu-latest
+    name: Verify Branch Requirements
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Verify commit messages
+        run: |
+          echo "🔍 Checking commit messages..."
+          
+          # Get the base branch (main or the target branch for PR)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            HEAD_BRANCH="${{ github.event.pull_request.head.ref }}"
+          else
+            BASE_BRANCH="main"
+            HEAD_BRANCH="${{ github.ref_name }}"
+          fi
+          
+          echo "Base branch: $BASE_BRANCH"
+          echo "Head branch: $HEAD_BRANCH"
+          
+          # Get commits in this branch that are not in base branch
+          COMMITS=$(git rev-list --no-merges origin/$BASE_BRANCH..HEAD)
+          
+          if [ -z "$COMMITS" ]; then
+            echo "ℹ️ No new commits found to check"
+            exit 0
+          fi
+          
+          echo "📝 Checking commits:"
+          FAILED=false
+          
+          for commit in $COMMITS; do
+            MESSAGE=$(git log --format=%B -n 1 $commit | head -n 1)
+            echo "Commit $commit: $MESSAGE"
+            
+            # Check if commit message is empty
+            if [ -z "$MESSAGE" ]; then
+              echo "❌ Error: Commit $commit has empty message"
+              FAILED=true
+              continue
+            fi
+            
+            # Check if commit message is too short (less than 10 characters)
+            if [ ${#MESSAGE} -lt 10 ]; then
+              echo "❌ Error: Commit $commit has too short message (less than 10 characters): '$MESSAGE'"
+              FAILED=true
+              continue
+            fi
+            
+            # Check if commit message starts with meaningful content (not just dots, spaces, etc.)
+            if echo "$MESSAGE" | grep -qE "^[\.]+$|^[[:space:]]+$|^[[:digit:]]+$"; then
+              echo "❌ Error: Commit $commit has non-descriptive message: '$MESSAGE'"
+              FAILED=true
+              continue
+            fi
+            
+            echo "✅ Commit $commit has valid message"
+          done
+          
+          if [ "$FAILED" = true ]; then
+            echo ""
+            echo "💡 Commit message requirements:"
+            echo "  - Must not be empty"
+            echo "  - Must be at least 10 characters long"
+            echo "  - Must be descriptive (not just dots, numbers, or spaces)"
+            echo "  - Should clearly describe what the commit does"
+            exit 1
+          fi
+          
+          echo "✅ All commit messages are valid!"
+
+      - name: Verify README file exists
+        run: |
+          echo "🔍 Checking for README file..."
+          
+          if [ -f "README.md" ]; then
+            echo "✅ README.md file found"
+            
+            # Check if README has content (not just empty or very minimal)
+            CONTENT=$(cat README.md | wc -c)
+            if [ "$CONTENT" -lt 10 ]; then
+              echo "❌ Error: README.md file is too short (less than 10 characters)"
+              echo "💡 README should contain meaningful content about the project"
+              exit 1
+            fi
+            
+            echo "✅ README.md has adequate content ($CONTENT characters)"
+            
+          elif [ -f "readme.md" ]; then
+            echo "✅ readme.md file found"
+            CONTENT=$(cat readme.md | wc -c)
+            if [ "$CONTENT" -lt 10 ]; then
+              echo "❌ Error: readme.md file is too short (less than 10 characters)"
+              exit 1
+            fi
+          elif [ -f "README.txt" ]; then
+            echo "✅ README.txt file found"
+            CONTENT=$(cat README.txt | wc -c)
+            if [ "$CONTENT" -lt 10 ]; then
+              echo "❌ Error: README.txt file is too short (less than 10 characters)"
+              exit 1
+            fi
+          else
+            echo "❌ Error: No README file found!"
+            echo "💡 Please add a README file (README.md, readme.md, or README.txt)"
+            echo "   The README should explain what your project/contribution is about"
+            exit 1
+          fi
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "🎉 All requirements verified successfully!"
+          echo "✅ Commit messages are properly formatted"
+          echo "✅ README file exists with adequate content"
+          echo ""
+          echo "Your branch meets all the contribution requirements!"
